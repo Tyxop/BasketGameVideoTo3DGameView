@@ -1,0 +1,985 @@
+{
+  "schema": "basket-match-calibration-v1",
+  "court": {
+    "length_m": 28.0,
+    "width_m": 15.0
+  },
+  "camera_rig": {
+    "type": "stereo_midcourt_opposite_side_approx",
+    "position_world_m": {
+      "x": 14.0,
+      "y": 17.0,
+      "z": 1.1
+    },
+    "baseline_m": 0.45,
+    "targets_world_m": {
+      "cam1": {
+        "x": 7.0,
+        "y": 7.5,
+        "z": 0.0
+      },
+      "cam2": {
+        "x": 21.0,
+        "y": 7.5,
+        "z": 0.0
+      }
+    },
+    "note": "Aproximacion visual: rig en la linea de medio campo, al lateral opuesto, con camaras proximas rotadas hacia tableros opuestos."
+  },
+  "cameras": {
+    "cam1": {
+      "video": "videos\\cam1.mov",
+      "frame_time": 0.0,
+      "points": [
+        {
+          "id": "cam1_1_0",
+          "type": "backboard",
+          "image": {
+            "x": 1460.1,
+            "y": 577.67
+          },
+          "frame_time": 0.0,
+          "label": "backboard_square_1",
+          "name": "Tablero esquina 1",
+          "world": null,
+          "plane": null,
+          "line": null
+        },
+        {
+          "id": "cam1_2_0",
+          "type": "backboard",
+          "image": {
+            "x": 1756.65,
+            "y": 645.49
+          },
+          "frame_time": 0.0,
+          "label": "backboard_square_2",
+          "name": "Tablero esquina 2",
+          "world": null,
+          "plane": null,
+          "line": null
+        },
+        {
+          "id": "cam1_3_0",
+          "type": "backboard",
+          "image": {
+            "x": 1746.6,
+            "y": 881.58
+          },
+          "frame_time": 0.0,
+          "label": "backboard_square_3",
+          "name": "Tablero esquina 3",
+          "world": null,
+          "plane": null,
+          "line": null
+        },
+        {
+          "id": "cam1_4_0",
+          "type": "backboard",
+          "image": {
+            "x": 1455.08,
+            "y": 833.86
+          },
+          "frame_time": 0.0,
+          "label": "backboard_square_4",
+          "name": "Tablero esquina 4",
+          "world": null,
+          "plane": null,
+          "line": null
+        },
+        {
+          "id": "cam1_5_0",
+          "type": "court",
+          "image": {
+            "x": 55.29,
+            "y": 1441.67
+          },
+          "frame_time": 0.0,
+          "label": "baseline_back_1",
+          "name": "Linea de fondo cercana punto 1",
+          "world": {
+            "axis": "x",
+            "value": 0.0,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "baseline_back"
+        },
+        {
+          "id": "cam1_6_0",
+          "type": "court",
+          "image": {
+            "x": 2279.37,
+            "y": 1398.98
+          },
+          "frame_time": 0.0,
+          "label": "baseline_back_2",
+          "name": "Linea de fondo cercana punto 2",
+          "world": {
+            "axis": "x",
+            "value": 0.0,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "baseline_back"
+        },
+        {
+          "id": "cam1_7_0",
+          "type": "court",
+          "image": {
+            "x": 1855.7,
+            "y": 1549.25
+          },
+          "frame_time": 0.0,
+          "label": "ft_near_1",
+          "name": "Tiro libre fondo cercano punto 1",
+          "world": {
+            "axis": "x",
+            "value": 5.8,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "ft_near"
+        },
+        {
+          "id": "cam1_8_0",
+          "type": "court",
+          "image": {
+            "x": 2696.81,
+            "y": 1500.42
+          },
+          "frame_time": 0.0,
+          "label": "ft_near_2",
+          "name": "Tiro libre fondo cercano punto 2",
+          "world": {
+            "axis": "x",
+            "value": 5.8,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "ft_near"
+        },
+        {
+          "id": "cam1_9_0",
+          "type": "court",
+          "image": {
+            "x": 85.45,
+            "y": 1632.56
+          },
+          "frame_time": 0.0,
+          "label": "sideline_right_1",
+          "name": "Lateral derecho punto 1",
+          "world": {
+            "axis": "y",
+            "value": 15.0,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "sideline_right"
+        },
+        {
+          "id": "cam1_10_0",
+          "type": "court",
+          "image": {
+            "x": 1246.49,
+            "y": 2082.14
+          },
+          "frame_time": 0.0,
+          "label": "sideline_right_2",
+          "name": "Lateral derecho punto 2",
+          "world": {
+            "axis": "y",
+            "value": 15.0,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "sideline_right"
+        },
+        {
+          "id": "cam1_11_0",
+          "type": "court",
+          "image": {
+            "x": 2503.04,
+            "y": 1406.51
+          },
+          "frame_time": 0.0,
+          "label": "sideline_left_1",
+          "name": "Lateral izquierdo punto 1",
+          "world": {
+            "axis": "y",
+            "value": 0.0,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "sideline_left"
+        },
+        {
+          "id": "cam1_12_0",
+          "type": "court",
+          "image": {
+            "x": 3762.09,
+            "y": 1504.47
+          },
+          "frame_time": 0.0,
+          "label": "sideline_left_2",
+          "name": "Lateral izquierdo punto 2",
+          "world": {
+            "axis": "y",
+            "value": 0.0,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "sideline_left"
+        },
+        {
+          "id": "cam1_13_0",
+          "type": "wall",
+          "image": {
+            "x": 2580.98,
+            "y": 714.97
+          },
+          "frame_time": 0.0,
+          "label": "left_wall_1",
+          "name": "Pared izquierda punto 1",
+          "world": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "plane": "left_wall",
+          "line": null
+        },
+        {
+          "id": "cam1_14_0",
+          "type": "wall",
+          "image": {
+            "x": 3391.79,
+            "y": 626.85
+          },
+          "frame_time": 0.0,
+          "label": "left_wall_2",
+          "name": "Pared izquierda punto 2",
+          "world": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "plane": "left_wall",
+          "line": null
+        },
+        {
+          "id": "cam1_15_0",
+          "type": "wall",
+          "image": {
+            "x": 3369.13,
+            "y": 1455.1
+          },
+          "frame_time": 0.0,
+          "label": "left_wall_3",
+          "name": "Pared izquierda punto 3",
+          "world": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "plane": "left_wall",
+          "line": null
+        },
+        {
+          "id": "cam1_16_0",
+          "type": "wall",
+          "image": {
+            "x": 2563.36,
+            "y": 1384.62
+          },
+          "frame_time": 0.0,
+          "label": "left_wall_4",
+          "name": "Pared izquierda punto 4",
+          "world": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "plane": "left_wall",
+          "line": null
+        }
+      ],
+      "image_size": {
+        "width": 3840,
+        "height": 2160
+      },
+      "projection": {
+        "court_intersections": [
+          {
+            "label": "baseline_back__sideline_right",
+            "image": {
+              "x": -385.67,
+              "y": 1450.13
+            },
+            "world": {
+              "x": 0.0,
+              "y": 15.0,
+              "z": 0.0
+            }
+          },
+          {
+            "label": "baseline_back__sideline_left",
+            "image": {
+              "x": 2381.15,
+              "y": 1397.03
+            },
+            "world": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            }
+          },
+          {
+            "label": "ft_near__sideline_right",
+            "image": {
+              "x": 129.15,
+              "y": 1649.48
+            },
+            "world": {
+              "x": 5.8,
+              "y": 15.0,
+              "z": 0.0
+            }
+          },
+          {
+            "label": "ft_near__sideline_left",
+            "image": {
+              "x": 3277.07,
+              "y": 1466.73
+            },
+            "world": {
+              "x": 5.8,
+              "y": 0.0,
+              "z": 0.0
+            }
+          }
+        ],
+        "vanishing_points": {
+          "x": {
+            "x": 5513.41,
+            "y": 1336.9,
+            "pairs": 1
+          },
+          "y": {
+            "x": -1253.03,
+            "y": 1114.27,
+            "pairs": 1
+          }
+        },
+        "court_homography_image_to_world": [
+          [
+            -0.00022546,
+            -0.01174758,
+            16.94856793
+          ],
+          [
+            0.00115641,
+            -0.01486444,
+            18.01248537
+          ],
+          [
+            2.847e-05,
+            -0.0008654,
+            1.0
+          ]
+        ],
+        "court_homography_world_to_image": [
+          [
+            42.72365364,
+            -172.39457423,
+            2381.15
+          ],
+          [
+            -37.99700955,
+            -41.8062853,
+            1397.03
+          ],
+          [
+            -0.03409915,
+            -0.0312705,
+            1.0
+          ]
+        ],
+        "camera_pose": {
+          "status": "estimated_from_court_homography_orthogonal_vanishing_points",
+          "image_size": {
+            "width": 3840,
+            "height": 2160
+          },
+          "intrinsics_source": "orthogonal_vanishing_points",
+          "quality": "ok",
+          "focal_px": 3375.380537,
+          "horizontal_fov_deg": 59.264581,
+          "principal_point_px": {
+            "x": 1920.0,
+            "y": 1080.0
+          },
+          "intrinsics": [
+            [
+              3375.380537,
+              0.0,
+              1920.0
+            ],
+            [
+              0.0,
+              3375.380537,
+              1080.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "rotation_world_to_camera": [
+            [
+              -0.68492498,
+              0.72787238,
+              -0.03285677
+            ],
+            [
+              0.00740411,
+              0.05204565,
+              0.99861726
+            ],
+            [
+              0.72857598,
+              0.68373463,
+              -0.04103661
+            ]
+          ],
+          "translation_world_to_camera": [
+            -2.95289758,
+            -2.03004905,
+            -21.61368973
+          ],
+          "camera_center_world_m": {
+            "x": 13.739733,
+            "y": 17.033016,
+            "z": 1.043267
+          },
+          "note": "Sistema tipo fSpy: focal desde dos puntos de fuga ortogonales si existen; si falta una direccion, usa FOV fallback y marca quality como incompleta."
+        },
+        "camera_pose_pnp": null,
+        "note": "camera_pose: homografia suelo + fugas ortogonales. camera_pose_pnp: solvePnP suelo + esquinas tablero (mas preciso en Z)."
+      }
+    },
+    "cam2": {
+      "video": "videos\\cam2.mov",
+      "frame_time": 0.0,
+      "points": [
+        {
+          "id": "cam2_1_0",
+          "type": "court",
+          "image": {
+            "x": 923.04,
+            "y": 2153.28
+          },
+          "frame_time": 0.0,
+          "label": "sideline_right_1",
+          "name": "Lateral derecho punto 1",
+          "world": {
+            "axis": "y",
+            "value": 15.0,
+            "z": 0.0
+          },
+          "plane": null,
+          "line": "sideline_right"
+        },
+        {
+          "id": "cam2_2_0",
+          "type": "court",
+          "image": {
+            "x": 3626.14,
+            "y": 1385.42
+          },
+          "frame_time": 0.0,
+          "label": "sideline_right_2",
+          "name": "Lateral derecho punto 2",
+          "world": {
+            "axis": "y",
+            "value": 15.0,
+            "z": 0.0
+          },
+          "plane": null,
+          "line": "sideline_right"
+        },
+        {
+          "id": "cam2_3_0",
+          "type": "court",
+          "image": {
+            "x": 2064.56,
+            "y": 1271.86
+          },
+          "frame_time": 0.0,
+          "label": "baseline_front_1",
+          "name": "Linea de fondo lejana punto 1",
+          "world": {
+            "axis": "x",
+            "value": 28.0,
+            "z": 0.0
+          },
+          "plane": null,
+          "line": "baseline_front"
+        },
+        {
+          "id": "cam2_4_0",
+          "type": "court",
+          "image": {
+            "x": 3690.66,
+            "y": 1359.12
+          },
+          "frame_time": 0.0,
+          "label": "baseline_front_2",
+          "name": "Linea de fondo lejana punto 2",
+          "world": {
+            "axis": "x",
+            "value": 28.0,
+            "z": 0.0
+          },
+          "plane": null,
+          "line": "baseline_front"
+        },
+        {
+          "id": "cam2_5_0",
+          "type": "court",
+          "image": {
+            "x": 730.36,
+            "y": 1330.96
+          },
+          "frame_time": 0.0,
+          "label": "sideline_left_1",
+          "name": "Lateral izquierdo punto 1",
+          "world": {
+            "axis": "y",
+            "value": 0.0,
+            "z": 0.0
+          },
+          "plane": null,
+          "line": "sideline_left"
+        },
+        {
+          "id": "cam2_6_0",
+          "type": "court",
+          "image": {
+            "x": 1944.24,
+            "y": 1277.3
+          },
+          "frame_time": 0.0,
+          "label": "sideline_left_2",
+          "name": "Lateral izquierdo punto 2",
+          "world": {
+            "axis": "y",
+            "value": 0.0,
+            "z": 0.0
+          },
+          "plane": null,
+          "line": "sideline_left"
+        },
+        {
+          "id": "cam2_7_0",
+          "type": "backboard",
+          "image": {
+            "x": 2381.6,
+            "y": 886.36
+          },
+          "frame_time": 0.0,
+          "label": "backboard_square_1",
+          "name": "Tablero esquina 1",
+          "world": null,
+          "plane": null,
+          "line": null
+        },
+        {
+          "id": "cam2_8_0",
+          "type": "backboard",
+          "image": {
+            "x": 2550.38,
+            "y": 852.46
+          },
+          "frame_time": 0.0,
+          "label": "backboard_square_2",
+          "name": "Tablero esquina 2",
+          "world": null,
+          "plane": null,
+          "line": null
+        },
+        {
+          "id": "cam2_9_0",
+          "type": "backboard",
+          "image": {
+            "x": 2551.82,
+            "y": 992.38
+          },
+          "frame_time": 0.0,
+          "label": "backboard_square_3",
+          "name": "Tablero esquina 3",
+          "world": null,
+          "plane": null,
+          "line": null
+        },
+        {
+          "id": "cam2_10_0",
+          "type": "backboard",
+          "image": {
+            "x": 2383.78,
+            "y": 1009.68
+          },
+          "frame_time": 0.0,
+          "label": "backboard_square_4",
+          "name": "Tablero esquina 4",
+          "world": null,
+          "plane": null,
+          "line": null
+        },
+        {
+          "id": "cam2_11_0",
+          "type": "wall",
+          "image": {
+            "x": 353.72,
+            "y": 1320.58
+          },
+          "frame_time": 0.0,
+          "label": "right_wall_1",
+          "name": "Pared derecha punto 1",
+          "world": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "plane": "right_wall",
+          "line": null
+        },
+        {
+          "id": "cam2_12_0",
+          "type": "wall",
+          "image": {
+            "x": 378.18,
+            "y": 749.14
+          },
+          "frame_time": 0.0,
+          "label": "right_wall_2",
+          "name": "Pared derecha punto 2",
+          "world": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "plane": "right_wall",
+          "line": null
+        },
+        {
+          "id": "cam2_13_0",
+          "type": "wall",
+          "image": {
+            "x": 1672.34,
+            "y": 891.88
+          },
+          "frame_time": 0.0,
+          "label": "right_wall_3",
+          "name": "Pared derecha punto 3",
+          "world": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "plane": "right_wall",
+          "line": null
+        },
+        {
+          "id": "cam2_14_0",
+          "type": "wall",
+          "image": {
+            "x": 1670.64,
+            "y": 1269.36
+          },
+          "frame_time": 0.0,
+          "label": "right_wall_4",
+          "name": "Pared derecha punto 4",
+          "world": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "plane": "right_wall",
+          "line": null
+        },
+        {
+          "id": "cam2_15_0",
+          "type": "court",
+          "image": {
+            "x": 699.32,
+            "y": 1426.89
+          },
+          "frame_time": 0.0,
+          "label": "midcourt_1",
+          "name": "Medio campo punto 1",
+          "world": {
+            "axis": "x",
+            "value": 14.0,
+            "z": 0.0
+          },
+          "plane": null,
+          "line": "midcourt"
+        },
+        {
+          "id": "cam2_16_0",
+          "type": "court",
+          "image": {
+            "x": 752.98,
+            "y": 1961.52
+          },
+          "frame_time": 0.0,
+          "label": "midcourt_2",
+          "name": "Medio campo punto 2",
+          "world": {
+            "axis": "x",
+            "value": 14.0,
+            "z": 0.0
+          },
+          "plane": null,
+          "line": "midcourt"
+        },
+        {
+          "id": "cam2_17_0",
+          "type": "court",
+          "image": {
+            "x": 1888.46,
+            "y": 1317.35
+          },
+          "frame_time": 0.0,
+          "label": "ft_far_1",
+          "name": "Tiro libre fondo lejano punto 1",
+          "world": {
+            "axis": "x",
+            "value": 22.2,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "ft_far"
+        },
+        {
+          "id": "cam2_18_0",
+          "type": "court",
+          "image": {
+            "x": 2321.95,
+            "y": 1364.25
+          },
+          "frame_time": 0.0,
+          "label": "ft_far_2",
+          "name": "Tiro libre fondo lejano punto 2",
+          "world": {
+            "axis": "x",
+            "value": 22.2,
+            "z": 0.0,
+            "usage": "calibration"
+          },
+          "plane": null,
+          "line": "ft_far"
+        }
+      ],
+      "image_size": {
+        "width": 3840,
+        "height": 2160
+      },
+      "projection": {
+        "court_intersections": [
+          {
+            "label": "baseline_front__sideline_right",
+            "image": {
+              "x": 3714.26,
+              "y": 1360.39
+            },
+            "world": {
+              "x": 28.0,
+              "y": 15.0,
+              "z": 0.0
+            }
+          },
+          {
+            "label": "baseline_front__sideline_left",
+            "image": {
+              "x": 2065.8,
+              "y": 1271.93
+            },
+            "world": {
+              "x": 28.0,
+              "y": 0.0,
+              "z": 0.0
+            }
+          },
+          {
+            "label": "midcourt__sideline_right",
+            "image": {
+              "x": 776.41,
+              "y": 2194.93
+            },
+            "world": {
+              "x": 14.0,
+              "y": 15.0,
+              "z": 0.0
+            }
+          },
+          {
+            "label": "midcourt__sideline_left",
+            "image": {
+              "x": 689.87,
+              "y": 1332.75
+            },
+            "world": {
+              "x": 14.0,
+              "y": 0.0,
+              "z": 0.0
+            }
+          },
+          {
+            "label": "ft_far__sideline_right",
+            "image": {
+              "x": 3320.39,
+              "y": 1472.27
+            },
+            "world": {
+              "x": 22.2,
+              "y": 15.0,
+              "z": 0.0
+            }
+          },
+          {
+            "label": "ft_far__sideline_left",
+            "image": {
+              "x": 1641.84,
+              "y": 1290.67
+            },
+            "world": {
+              "x": 22.2,
+              "y": 0.0,
+              "z": 0.0
+            }
+          }
+        ],
+        "vanishing_points": {
+          "x": {
+            "x": 744.12,
+            "y": 1197.26,
+            "pairs": 3
+          },
+          "y": {
+            "x": 4386.87,
+            "y": 1169.32,
+            "pairs": 1
+          }
+        },
+        "court_homography_image_to_world": [
+          [
+            -0.00088588,
+            -0.01160162,
+            14.4516049
+          ],
+          [
+            -0.00068367,
+            -0.01450112,
+            19.82656847
+          ],
+          [
+            -8.01e-06,
+            -0.00083329,
+            1.0
+          ]
+        ],
+        "court_homography_world_to_image": [
+          [
+            419.96301876,
+            -88.51459214,
+            -4284.64363498
+          ],
+          [
+            107.55177049,
+            -155.15146191,
+            1578.97839349
+          ],
+          [
+            0.09341367,
+            -0.1306065,
+            1.0
+          ]
+        ],
+        "camera_pose": {
+          "status": "estimated_from_court_homography_orthogonal_vanishing_points",
+          "image_size": {
+            "width": 3840,
+            "height": 2160
+          },
+          "intrinsics_source": "orthogonal_vanishing_points",
+          "quality": "ok",
+          "focal_px": 1700.079243,
+          "horizontal_fov_deg": 96.952922,
+          "principal_point_px": {
+            "x": 1920.0,
+            "y": 1080.0
+          },
+          "intrinsics": [
+            [
+              1700.079243,
+              0.0,
+              1920.0
+            ],
+            [
+              0.0,
+              1700.079243,
+              1080.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0
+            ]
+          ],
+          "rotation_world_to_camera": [
+            [
+              -0.82167145,
+              -0.56988115,
+              0.00956554
+            ],
+            [
+              -0.02429209,
+              0.05178272,
+              0.99836288
+            ],
+            [
+              -0.56944352,
+              0.82009391,
+              -0.05639199
+            ]
+          ],
+          "translation_world_to_camera": [
+            22.01257013,
+            -1.77025427,
+            -6.03146865
+          ],
+          "camera_center_world_m": {
+            "x": 14.609517,
+            "y": 17.582588,
+            "z": 1.216668
+          },
+          "note": "Sistema tipo fSpy: focal desde dos puntos de fuga ortogonales si existen; si falta una direccion, usa FOV fallback y marca quality como incompleta."
+        },
+        "camera_pose_pnp": null,
+        "note": "camera_pose: homografia suelo + fugas ortogonales. camera_pose_pnp: solvePnP suelo + esquinas tablero (mas preciso en Z)."
+      }
+    }
+  }
+}
