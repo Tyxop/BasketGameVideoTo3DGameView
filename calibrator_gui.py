@@ -370,11 +370,35 @@ _LIMB_COLOR: dict[tuple[int, int], str] = {
     (0, 1): "#c3fae8", (0, 2): "#c3fae8", (1, 3): "#c3fae8", (2, 4): "#c3fae8",
 }
 
+# MediaPipe 33-landmark skeleton (simplified for 3D render)
+MP_SKELETON_3D: list[tuple[int, int]] = [
+    (0, 11), (0, 12),
+    (11, 12),
+    (11, 13), (13, 15), (15, 17), (15, 19),
+    (12, 14), (14, 16), (16, 18), (16, 20),
+    (11, 23), (12, 24), (23, 24),
+    (23, 25), (25, 27), (27, 29), (27, 31),
+    (24, 26), (26, 28), (28, 30), (28, 32),
+]
+_MP_LIMB_COLOR: dict[tuple[int, int], str] = {
+    **{(a, b): "#ffe066" for a, b in [(0,11),(0,12),(11,12),(11,23),(12,24),(23,24)]},
+    **{(a, b): "#ff6b6b" for a, b in [(11,13),(13,15),(15,17),(15,19),(23,25),(25,27),(27,29),(27,31)]},
+    **{(a, b): "#4dabf7" for a, b in [(12,14),(14,16),(16,18),(16,20),(24,26),(26,28),(28,30),(28,32)]},
+}
+
 try:
     from ultralytics import YOLO as _YOLO  # type: ignore
     _YOLO_AVAILABLE = True
 except ImportError:
     _YOLO_AVAILABLE = False
+
+try:
+    import mediapipe as _mp
+    from mediapipe.tasks import python as _mp_tasks
+    from mediapipe.tasks.python import vision as _mp_vision
+    _MP_AVAILABLE = True
+except ImportError:
+    _MP_AVAILABLE = False
 
 
 @dataclass
@@ -382,7 +406,8 @@ class PlayerDetection:
     bbox: tuple[float, float, float, float]   # x1, y1, x2, y2 in image pixels
     keypoints: "np.ndarray | None"            # (17, 3): x, y, conf
     confidence: float
-    world_pos: "tuple[float, float] | None" = None  # projected court position (m)
+    world_pos: "tuple[float, float] | None" = None   # projected court position (m)
+    mp_world:  "list[tuple[float,float,float]] | None" = None  # 33 MediaPipe world landmarks (m)
 
 
 def _player_foot_image_pos(det: PlayerDetection) -> tuple[float, float]:
@@ -508,6 +533,107 @@ class PlayerDetector:
             if not suppressed:
                 keep.append(d)
         return keep
+
+
+class PoseEstimator3D:
+    """
+    MediaPipe PoseLandmarker wrapper.
+    Runs on individual player crops and returns 33 world landmarks (metres, hip-centred).
+    Thread-safe: each call creates a fresh landmarker (stateless IMAGE mode).
+    """
+    _MODEL_PATH = str(ROOT / "pose_landmarker_lite.task")
+
+    @staticmethod
+    def available() -> bool:
+        return _MP_AVAILABLE and Path(PoseEstimator3D._MODEL_PATH).exists()
+
+    def estimate(
+        self, frame_bgr: "np.ndarray", bbox: tuple[float, float, float, float]
+    ) -> "list[tuple[float,float,float]] | None":
+        if not _MP_AVAILABLE:
+            return None
+        model_path = self._MODEL_PATH
+        if not Path(model_path).exists():
+            return None
+        try:
+            base_opts = _mp_tasks.BaseOptions(model_asset_path=model_path)
+            opts = _mp_vision.PoseLandmarkerOptions(
+                base_options=base_opts,
+                running_mode=_mp_vision.RunningMode.IMAGE,
+                num_poses=1,
+                min_pose_detection_confidence=0.25,
+                min_pose_presence_confidence=0.25,
+                output_segmentation_masks=False,
+            )
+            x1, y1, x2, y2 = (int(v) for v in bbox)
+            h, w = frame_bgr.shape[:2]
+            pad = int(max(y2 - y1, x2 - x1) * 0.15)
+            x1 = max(0, x1 - pad); y1 = max(0, y1 - pad)
+            x2 = min(w, x2 + pad); y2 = min(h, y2 + pad)
+            crop = frame_bgr[y1:y2, x1:x2]
+            if crop.size == 0:
+                return None
+            rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            mp_img = _mp.Image(image_format=_mp.ImageFormat.SRGB, data=rgb)
+            with _mp_vision.PoseLandmarker.create_from_options(opts) as lm:
+                result = lm.detect(mp_img)
+            if not result.pose_world_landmarks:
+                return None
+            return [(lmk.x, lmk.y, lmk.z) for lmk in result.pose_world_landmarks[0]]
+        except Exception:
+            return None
+
+
+def _mp_world_to_court(
+    mp_wl: "list[tuple[float,float,float]]",
+    foot_world: tuple[float, float],
+    camera_xy: tuple[float, float],
+) -> list[tuple[float, float, float]]:
+    """
+    Map MediaPipe world landmarks (33, metric, hip-centred) → court world coords.
+
+    MediaPipe world convention (verified from real data):
+      x: camera-right  (positive = right from camera view)
+      y: downward       (positive = down, i.e. BELOW hip)
+      z: toward camera  (positive = closer to camera)
+
+    Axis mapping to court:
+      court Z (up)         ←  -mp_y  (flip: down→up)
+      court XY lateral     ←  mp_x * camera_right_dir
+      court XY depth       ←  -mp_z * camera_forward_dir  (toward camera = negative forward)
+
+    The floor anchor is the foot world position (wx, wy).  We zero the Z by measuring
+    the average ankle height in MediaPipe coords and subtracting it, so ankles land at Z=0.
+    """
+    wx, wy = foot_world
+    Cx, Cy = camera_xy
+
+    # Camera-forward unit vector (camera → player, horizontal only)
+    dx, dy = wx - Cx, wy - Cy
+    d_len = math.sqrt(dx * dx + dy * dy)
+    if d_len < 0.1:
+        dx, dy = 0.0, 1.0
+    else:
+        dx, dy = dx / d_len, dy / d_len
+
+    # Camera-right unit vector (perpendicular, 90° CCW)
+    rx, ry = -dy, dx
+
+    # Zero the vertical axis at ankle level
+    # Landmarks 27=left_ankle, 28=right_ankle; mp_y positive = below hip
+    ankle_ys = [mp_wl[i][1] for i in (27, 28) if i < len(mp_wl)]
+    ankle_y_avg = sum(ankle_ys) / len(ankle_ys) if ankle_ys else 0.9
+
+    court_pts: list[tuple[float, float, float]] = []
+    for mx, my, mz in mp_wl:
+        # Lateral: positive mp_x = camera-right direction in world
+        # Depth:   positive mp_z = toward camera → subtract from forward
+        cX = wx + mx * rx + (-mz) * dx
+        cY = wy + mx * ry + (-mz) * dy
+        # Vertical: flip y (down→up), shift so ankle = 0
+        cZ = -(my - ankle_y_avg)
+        court_pts.append((cX, cY, cZ))
+    return court_pts
 
 
 class CalibratorApp(tk.Tk):
@@ -2076,6 +2202,7 @@ class Calibration3DWindow(tk.Toplevel):
         self._floor_tk_image: Any = None
         self._player_cache_3d: dict[str, list[PlayerDetection]] = {}
         self._player_running_3d: set[str] = set()
+        self._pose_estimator_3d = PoseEstimator3D()
         self.drag_start: tuple[int, int, float, float] | None = None
         self.pan_start: tuple[int, int, float, float] | None = None
 
@@ -2304,10 +2431,14 @@ class Calibration3DWindow(tk.Toplevel):
         self._player_running_3d.add(key)
         self._players_status_lbl.config(text="Detectando…")
         detector = self._app._player_detector
+        pose_est = self._pose_estimator_3d
 
         def run() -> None:
+            # ── YOLO person detection ──────────────────────────────────────────
             dets = detector.detect(frame_bgr)
             camera = self.payload.get("cameras", {}).get(camera_name, {})
+
+            # Project foot to world via homography
             H_raw = camera.get("projection", {}).get("court_homography_image_to_world")
             if H_raw is not None:
                 H = np.asarray(H_raw, dtype=np.float64)
@@ -2316,6 +2447,12 @@ class Calibration3DWindow(tk.Toplevel):
                     pt = H @ np.array([u, v, 1.0])
                     if abs(pt[2]) > 1e-9:
                         det.world_pos = (float(pt[0] / pt[2]), float(pt[1] / pt[2]))
+
+            # ── MediaPipe 3D pose per person ───────────────────────────────────
+            if PoseEstimator3D.available():
+                for det in dets:
+                    det.mp_world = pose_est.estimate(frame_bgr, det.bbox)
+
             self._player_cache_3d[key] = dets
             self._player_running_3d.discard(key)
             self.after(0, self._on_detection_done_3d)
@@ -2463,6 +2600,39 @@ class Calibration3DWindow(tk.Toplevel):
             self.canvas.create_text(sx, sy - 14, text=label,
                                     fill=color, font=("Segoe UI", 8, "bold"))
 
+    def _draw_mp_stick_figure_3d(
+        self,
+        court_pts: list[tuple[float, float, float]],
+        foot_world: tuple[float, float],
+        color: str,
+        label: str,
+    ) -> None:
+        """Draw a MediaPipe 33-landmark skeleton already transformed to court coords."""
+        # Shadow
+        sx, sy = self._project((foot_world[0], foot_world[1], 0.0))
+        self.canvas.create_oval(sx - 10, sy - 5, sx + 10, sy + 5,
+                                fill="#111a28", outline=color, width=1)
+        # Limbs
+        for a_idx, b_idx in MP_SKELETON_3D:
+            if a_idx >= len(court_pts) or b_idx >= len(court_pts):
+                continue
+            pa, pb = court_pts[a_idx], court_pts[b_idx]
+            lc = _MP_LIMB_COLOR.get((a_idx, b_idx), _MP_LIMB_COLOR.get((b_idx, a_idx), color))
+            sax, say = self._project(pa)
+            sbx, sby = self._project(pb)
+            self.canvas.create_line(sax, say, sbx, sby, fill=lc, width=3)
+        # Joints
+        for i, pt in enumerate(court_pts):
+            jx, jy = self._project(pt)
+            r = 5 if i == 0 else 3
+            self.canvas.create_oval(jx - r, jy - r, jx + r, jy + r,
+                                    fill="#ffffff" if i == 0 else color, outline="")
+        # Label above nose (landmark 0)
+        if court_pts:
+            lx, ly = self._project((court_pts[0][0], court_pts[0][1], court_pts[0][2] + 0.15))
+            self.canvas.create_text(lx, ly - 6, text=label, fill=color,
+                                    font=("Segoe UI", 8, "bold"))
+
     def _draw_players_3d(self) -> None:
         if not PlayerDetector.available():
             return
@@ -2474,9 +2644,19 @@ class Calibration3DWindow(tk.Toplevel):
             if not camera:
                 continue
 
-            # H_image_to_world for anchored pose reconstruction
+            # H_image_to_world for floor projection + anchored fallback
             H_raw = camera.get("projection", {}).get("court_homography_image_to_world")
             H_i2w = np.asarray(H_raw, dtype=np.float64) if H_raw is not None else None
+
+            # Camera world XY for MediaPipe depth orientation
+            cam_xy: tuple[float, float] = (CAMERA_RIG_POSITION[0], CAMERA_RIG_POSITION[1])
+            for pose_key in ("camera_pose_pnp", "camera_pose"):
+                pose = camera.get("projection", {}).get(pose_key) or {}
+                center = pose.get("camera_center_world_m")
+                if center:
+                    cam_xy = (float(center.get("x", cam_xy[0])),
+                              float(center.get("y", cam_xy[1])))
+                    break
 
             frame_time = float(camera.get("frame_time", 0.0))
             key = f"3d_{camera_name}@{frame_time:.4f}"
@@ -2508,11 +2688,16 @@ class Calibration3DWindow(tk.Toplevel):
                 color = PLAYER_PALETTE[global_idx % len(PLAYER_PALETTE)]
                 label = f"P{global_idx + 1}"
 
-                if H_i2w is not None and det.keypoints is not None:
+                if det.mp_world is not None and len(det.mp_world) == 33:
+                    # ── True 3D from MediaPipe ─────────────────────────────────
+                    court_pts = _mp_world_to_court(det.mp_world, (wx, wy), cam_xy)
+                    self._draw_mp_stick_figure_3d(court_pts, (wx, wy), color, label)
+                elif H_i2w is not None and det.keypoints is not None:
+                    # ── Fallback: 2D-anchored skeleton ────────────────────────
                     kp3d = self._reconstruct_pose_anchored(det, (wx, wy), H_i2w)
                     self._draw_stick_figure_3d(kp3d, (wx, wy), color, label)
                 else:
-                    # Fallback: simple floor circle + vertical bar
+                    # ── Minimal: floor dot + bar ──────────────────────────────
                     sx, sy = self._project((wx, wy, 0.0))
                     hx, hy = self._project((wx, wy, 1.9))
                     self.canvas.create_line(sx, sy, hx, hy, fill=color, width=2)
