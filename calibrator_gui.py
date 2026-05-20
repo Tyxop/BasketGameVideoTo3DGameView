@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import sys
+import threading
 import tkinter as tk
 from dataclasses import asdict, dataclass, field, replace as dc_replace
 from pathlib import Path
@@ -318,6 +319,102 @@ class VideoSource:
         self.capture.release()
 
 
+# COCO-17 skeleton connections (indices into the 17-keypoint array)
+SKELETON_CONNECTIONS: list[tuple[int, int]] = [
+    (0, 1), (0, 2), (1, 3), (2, 4),          # cabeza
+    (5, 6), (5, 7), (7, 9), (6, 8), (8, 10), # hombros + brazos
+    (5, 11), (6, 12), (11, 12),               # torso
+    (11, 13), (13, 15), (12, 14), (14, 16),  # piernas
+]
+# Colores por jugador (rueda)
+PLAYER_PALETTE = [
+    "#ff6b6b", "#ffa94d", "#ffe066", "#69db7c", "#4dabf7",
+    "#cc5de8", "#f06595", "#63e6be", "#74c0fc", "#a9e34b",
+]
+
+try:
+    from ultralytics import YOLO as _YOLO  # type: ignore
+    _YOLO_AVAILABLE = True
+except ImportError:
+    _YOLO_AVAILABLE = False
+
+
+@dataclass
+class PlayerDetection:
+    bbox: tuple[float, float, float, float]   # x1, y1, x2, y2 in image pixels
+    keypoints: "np.ndarray | None"            # (17, 3): x, y, conf
+    confidence: float
+    world_pos: "tuple[float, float] | None" = None  # projected court position (m)
+
+
+def _player_foot_image_pos(det: PlayerDetection) -> tuple[float, float]:
+    """Best estimate of ground contact point in raw image pixels."""
+    if det.keypoints is not None and len(det.keypoints) >= 17:
+        ankles = [
+            (det.keypoints[i][0], det.keypoints[i][1])
+            for i in (15, 16) if det.keypoints[i][2] > 0.3
+        ]
+        if ankles:
+            return (sum(p[0] for p in ankles) / len(ankles),
+                    sum(p[1] for p in ankles) / len(ankles))
+    x1, _y1, x2, y2 = det.bbox
+    return ((x1 + x2) / 2, y2)
+
+
+class PlayerDetector:
+    """Lazy-loaded YOLOv8n-pose detector.  Thread-safe for single sequential use."""
+
+    def __init__(self) -> None:
+        self._model: Any = None
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def available() -> bool:
+        return _YOLO_AVAILABLE
+
+    def _load(self) -> bool:
+        if self._model is not None:
+            return True
+        if not _YOLO_AVAILABLE:
+            return False
+        try:
+            self._model = _YOLO("yolov8n-pose.pt")
+            return True
+        except Exception:
+            return False
+
+    def detect(self, frame_bgr: "np.ndarray", conf: float = 0.35) -> list[PlayerDetection]:
+        with self._lock:
+            if not self._load():
+                return []
+            try:
+                results = self._model.predict(frame_bgr, conf=conf, verbose=False, classes=[0])
+            except Exception:
+                return []
+        detections: list[PlayerDetection] = []
+        for r in results:
+            if r.boxes is None or len(r.boxes) == 0:
+                continue
+            n = len(r.boxes)
+            boxes = r.boxes.xyxy.cpu().numpy()
+            confs = r.boxes.conf.cpu().numpy()
+            kp_xy = r.keypoints.xy.cpu().numpy() if r.keypoints is not None else None
+            kp_c = r.keypoints.conf.cpu().numpy() if r.keypoints is not None else None
+            for i in range(n):
+                kp: np.ndarray | None = None
+                if kp_xy is not None and i < len(kp_xy):
+                    xy = kp_xy[i]
+                    c = kp_c[i] if kp_c is not None else np.ones(len(xy))
+                    kp = np.column_stack([xy, c])
+                box = boxes[i]
+                detections.append(PlayerDetection(
+                    bbox=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
+                    keypoints=kp,
+                    confidence=float(confs[i]),
+                ))
+        return detections
+
+
 class CalibratorApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -348,6 +445,10 @@ class CalibratorApp(tk.Tk):
         self.view_zoom = 1.0
         self.view_pan = [0.0, 0.0]
         self.pan_start: tuple[int, int, float, float] | None = None
+        self.show_body_tracking = tk.BooleanVar(value=False)
+        self._player_detector = PlayerDetector()
+        self._detection_cache: dict[str, list[PlayerDetection]] = {}
+        self._detection_running: set[str] = set()
 
         self.cameras = {
             camera: CameraCalibration(video=str(path.relative_to(ROOT)))
@@ -406,6 +507,12 @@ class CalibratorApp(tk.Tk):
             ).pack(side="left", padx=(0, 4))
         self.lens_btn = ttk.Button(camera_bar, text="Lente…", command=lambda: self._open_lens_config(self.active_camera.get()))
         self.lens_btn.pack(side="left", padx=(8, 0))
+        ttk.Checkbutton(
+            camera_bar, text="Body tracking",
+            variable=self.show_body_tracking, command=self._on_body_tracking_toggle,
+        ).pack(side="left", padx=(12, 0))
+        self._tracking_status_lbl = ttk.Label(camera_bar, text="", foreground="#ffa94d")
+        self._tracking_status_lbl.pack(side="left", padx=(4, 0))
 
         viewer = ttk.Frame(main)
         viewer.grid(row=1, column=0, sticky="nsew")
@@ -956,6 +1063,8 @@ class CalibratorApp(tk.Tk):
             self._draw_connections()
         self._draw_points()
         self._draw_3d_court_overlay()
+        if self.show_body_tracking.get():
+            self._draw_body_tracking_overlay()
         self._refresh_point_list()
         self._draw_top_view()
         self._refresh_projection_status()
@@ -1640,6 +1749,102 @@ class CalibratorApp(tk.Tk):
                 color, width, dash = "#8be8ff", 2, ()
             self.canvas.create_line(s[0], s[1], e[0], e[1], fill=color, width=width, dash=dash)
 
+    # ── Body tracking ──────────────────────────────────────────────────────────
+
+    def _on_body_tracking_toggle(self) -> None:
+        if not PlayerDetector.available():
+            messagebox.showwarning(
+                "Body tracking",
+                "Ultralytics no está instalado.\n"
+                "Ejecuta:  pip install ultralytics",
+            )
+            self.show_body_tracking.set(False)
+            return
+        self._render()
+
+    def _detection_cache_key(self) -> str:
+        cam = self.active_camera.get()
+        t = self.cameras[cam].frame_time
+        return f"{cam}@{t:.4f}"
+
+    def _trigger_detection_async(self, key: str, frame_bgr: np.ndarray) -> None:
+        if key in self._detection_running:
+            return
+        self._detection_running.add(key)
+        self._tracking_status_lbl.config(text="Detectando…")
+
+        def run() -> None:
+            dets = self._player_detector.detect(frame_bgr)
+            self._detection_cache[key] = dets
+            self._detection_running.discard(key)
+            self.after(0, self._on_detection_done)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_detection_done(self) -> None:
+        pending = bool(self._detection_running)
+        self._tracking_status_lbl.config(text="Detectando…" if pending else "")
+        self._render()
+
+    def _draw_body_tracking_overlay(self) -> None:
+        if cv2 is None or not self.current_image:
+            return
+        key = self._detection_cache_key()
+        if key not in self._detection_cache:
+            # Grab the raw frame from video to run detection on (full resolution)
+            cam = self.active_camera.get()
+            source = self.sources.get(cam)
+            if source is None:
+                return
+            try:
+                pil_frame = source.read_at(self.cameras[cam].frame_time)
+                bgr = cv2.cvtColor(np.asarray(pil_frame), cv2.COLOR_RGB2BGR)
+            except Exception:
+                return
+            self._trigger_detection_async(key, bgr)
+            return  # will re-render when done
+
+        detections = self._detection_cache[key]
+        iw, ih = self.current_image.width, self.current_image.height
+
+        for idx, det in enumerate(detections):
+            color = PLAYER_PALETTE[idx % len(PLAYER_PALETTE)]
+
+            # Bounding box
+            x1, y1, x2, y2 = det.bbox
+            sx1, sy1 = self._image_to_screen(x1, y1)
+            sx2, sy2 = self._image_to_screen(x2, y2)
+            self.canvas.create_rectangle(sx1, sy1, sx2, sy2, outline=color, width=2)
+            self.canvas.create_text(sx1 + 4, sy1 - 8, text=f"P{idx+1} {det.confidence:.0%}",
+                                    fill=color, anchor="w", font=("Segoe UI", 8, "bold"))
+
+            if det.keypoints is None:
+                continue
+
+            # Skeleton limbs
+            kp = det.keypoints  # (17, 3)
+            for a, b in SKELETON_CONNECTIONS:
+                if a >= len(kp) or b >= len(kp):
+                    continue
+                xa, ya, ca = kp[a]
+                xb, yb, cb = kp[b]
+                if ca < 0.25 or cb < 0.25:
+                    continue
+                sxa, sya = self._image_to_screen(float(xa), float(ya))
+                sxb, syb = self._image_to_screen(float(xb), float(yb))
+                self.canvas.create_line(sxa, sya, sxb, syb, fill=color, width=2)
+
+            # Keypoint dots
+            for kx, ky, kc in kp:
+                if kc < 0.25:
+                    continue
+                sx, sy = self._image_to_screen(float(kx), float(ky))
+                r = 3
+                self.canvas.create_oval(sx - r, sy - r, sx + r, sy + r,
+                                        fill=color, outline="")
+
+    # ── End body tracking ───────────────────────────────────────────────────────
+
     def _undo(self) -> None:
         if self._active_points():
             self._active_points().pop()
@@ -1771,8 +1976,11 @@ class Calibration3DWindow(tk.Toplevel):
         self.show_estimated_pose = tk.BooleanVar(value=False)
         self.show_camera_mapping = tk.BooleanVar(value=False)
         self.mapping_camera = tk.StringVar(value="cam2")
+        self.show_players_3d = tk.BooleanVar(value=False)
         self.mapping_cache: dict[str, Any] = {}
         self._floor_tk_image: Any = None
+        self._player_cache_3d: dict[str, list[PlayerDetection]] = {}
+        self._player_running_3d: set[str] = set()
         self.drag_start: tuple[int, int, float, float] | None = None
         self.pan_start: tuple[int, int, float, float] | None = None
 
@@ -1805,6 +2013,9 @@ class Calibration3DWindow(tk.Toplevel):
         self.mapping_combo = ttk.Combobox(bar, state="readonly", width=7, textvariable=self.mapping_camera, values=["cam2", "cam1", "mix"])
         self.mapping_combo.pack(side="left", padx=(0, 8))
         self.mapping_combo.bind("<<ComboboxSelected>>", lambda _event: self._draw())
+        ttk.Checkbutton(bar, text="Jugadores", variable=self.show_players_3d, command=self._draw).pack(side="left", padx=(0, 8))
+        self._players_status_lbl = ttk.Label(bar, text="", foreground="#ffa94d")
+        self._players_status_lbl.pack(side="left", padx=(0, 8))
         ttk.Label(
             bar,
             text="Arrastre izquierdo: rotar | rueda: zoom | boton central: paneo",
@@ -1832,11 +2043,13 @@ class Calibration3DWindow(tk.Toplevel):
             return
         self.payload = json.loads(Path(path).read_text(encoding="utf-8"))
         self.mapping_cache.clear()
+        self._player_cache_3d.clear()
         self._draw()
 
     def _recalculate_from_calibrator(self) -> None:
         self.payload = self.payload_provider()
         self.mapping_cache.clear()
+        self._player_cache_3d.clear()
         self._draw()
 
     def _reset_view(self) -> None:
@@ -1945,6 +2158,8 @@ class Calibration3DWindow(tk.Toplevel):
         self._draw_backboards()
         self._draw_cameras()
         self._draw_mark_summary()
+        if self.show_players_3d.get():
+            self._draw_players_3d()
 
     def _draw_floor(self) -> None:
         L, W = self.court_spec.length_m, self.court_spec.width_m
@@ -1985,6 +2200,98 @@ class Calibration3DWindow(tk.Toplevel):
             if center:
                 return float(center.get("x", 0)), float(center.get("y", 0))
         return None
+
+    # ── Player detection in 3D view ────────────────────────────────────────────
+
+    def _detect_camera_async_3d(self, key: str, camera_name: str, frame_bgr: np.ndarray) -> None:
+        if key in self._player_running_3d:
+            return
+        self._player_running_3d.add(key)
+        self._players_status_lbl.config(text="Detectando…")
+        detector = self._app._player_detector  # share detector/weights with main app
+
+        def run() -> None:
+            dets = detector.detect(frame_bgr)
+            # Project each detection to world coords using H_image_to_world
+            camera = self.payload.get("cameras", {}).get(camera_name, {})
+            H_raw = camera.get("projection", {}).get("court_homography_image_to_world")
+            if H_raw is not None:
+                H = np.asarray(H_raw, dtype=np.float64)
+                for det in dets:
+                    u, v = _player_foot_image_pos(det)
+                    pt = H @ np.array([u, v, 1.0])
+                    if abs(pt[2]) > 1e-9:
+                        det.world_pos = (float(pt[0] / pt[2]), float(pt[1] / pt[2]))
+            self._player_cache_3d[key] = dets
+            self._player_running_3d.discard(key)
+            self.after(0, self._on_detection_done_3d)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_detection_done_3d(self) -> None:
+        pending = bool(self._player_running_3d)
+        self._players_status_lbl.config(text="Detectando…" if pending else "")
+        self._draw()
+
+    def _draw_players_3d(self) -> None:
+        if not PlayerDetector.available():
+            return
+        L = self.court_spec.length_m
+
+        all_detections: list[tuple[int, PlayerDetection]] = []  # (global_idx, det)
+        global_idx = 0
+
+        for camera_name in ("cam1", "cam2"):
+            camera = self.payload.get("cameras", {}).get(camera_name)
+            if not camera:
+                continue
+            frame_time = float(camera.get("frame_time", 0.0))
+            key = f"3d_{camera_name}@{frame_time:.4f}"
+
+            if key not in self._player_cache_3d:
+                # Load video frame and trigger detection
+                video_path = ROOT / camera.get("video", f"videos/{camera_name}.mov")
+                if not video_path.exists():
+                    continue
+                try:
+                    src = VideoSource(video_path)
+                    pil = src.read_at(frame_time)
+                    src.close()
+                    bgr = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
+                except Exception:
+                    continue
+                self._detect_camera_async_3d(key, camera_name, bgr)
+                continue
+
+            for det in self._player_cache_3d[key]:
+                all_detections.append((global_idx, det))
+                global_idx += 1
+
+        for idx, det in all_detections:
+            color = PLAYER_PALETTE[idx % len(PLAYER_PALETTE)]
+            wp = det.world_pos
+            if wp is None:
+                continue
+            wx, wy = wp
+            # Discard implausible positions (outside court + margin)
+            if not (-5 < wx < L + 5 and -5 < wy < self.court_spec.width_m + 5):
+                continue
+
+            # Circle on the floor
+            sx, sy = self._project((wx, wy, 0.0))
+            r = 6
+            self.canvas.create_oval(sx - r, sy - r, sx + r, sy + r,
+                                    fill=color, outline="#ffffff", width=1)
+
+            # Vertical stick (approx 2 m player height)
+            hx, hy = self._project((wx, wy, 2.0))
+            self.canvas.create_line(sx, sy, hx, hy, fill=color, width=2)
+
+            # Label
+            self.canvas.create_text(hx, hy - 8, text=f"P{idx+1}",
+                                    fill=color, font=("Segoe UI", 8, "bold"))
+
+    # ── End player detection ────────────────────────────────────────────────────
 
     def _undistorted_frame(self, camera_name: str) -> np.ndarray | None:
         """Return a downscaled + undistorted camera frame (cached)."""
