@@ -383,15 +383,26 @@ class PlayerDetector:
         except Exception:
             return False
 
-    def detect(self, frame_bgr: "np.ndarray", conf: float = 0.35) -> list[PlayerDetection]:
+    def detect(self, frame_bgr: "np.ndarray", conf: float = 0.25,
+               tiled: bool = True) -> list[PlayerDetection]:
+        """Detect persons with tiled inference for small players in wide shots."""
         with self._lock:
             if not self._load():
                 return []
             try:
-                results = self._model.predict(frame_bgr, conf=conf, verbose=False, classes=[0])
+                raw = self._predict_tiled(frame_bgr, conf) if tiled else \
+                      self._predict_once(frame_bgr, conf, frame_bgr.shape[1], frame_bgr.shape[0])
             except Exception:
                 return []
-        detections: list[PlayerDetection] = []
+        # NMS to remove duplicates introduced by tiling
+        return self._nms(raw, iou_thr=0.45)
+
+    def _predict_once(self, crop: "np.ndarray", conf: float,
+                      ox: int, oy: int) -> list[PlayerDetection]:
+        """Run the model on a single crop; offset detections by (ox, oy)."""
+        results = self._model.predict(crop, imgsz=1280, conf=conf,
+                                      verbose=False, classes=[0])
+        out: list[PlayerDetection] = []
         for r in results:
             if r.boxes is None or len(r.boxes) == 0:
                 continue
@@ -399,20 +410,66 @@ class PlayerDetector:
             boxes = r.boxes.xyxy.cpu().numpy()
             confs = r.boxes.conf.cpu().numpy()
             kp_xy = r.keypoints.xy.cpu().numpy() if r.keypoints is not None else None
-            kp_c = r.keypoints.conf.cpu().numpy() if r.keypoints is not None else None
+            kp_c  = r.keypoints.conf.cpu().numpy() if r.keypoints is not None else None
             for i in range(n):
                 kp: np.ndarray | None = None
                 if kp_xy is not None and i < len(kp_xy):
-                    xy = kp_xy[i]
+                    xy = kp_xy[i].copy()
+                    xy[:, 0] += ox
+                    xy[:, 1] += oy
                     c = kp_c[i] if kp_c is not None else np.ones(len(xy))
                     kp = np.column_stack([xy, c])
                 box = boxes[i]
-                detections.append(PlayerDetection(
-                    bbox=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
+                out.append(PlayerDetection(
+                    bbox=(float(box[0]) + ox, float(box[1]) + oy,
+                          float(box[2]) + ox, float(box[3]) + oy),
                     keypoints=kp,
                     confidence=float(confs[i]),
                 ))
-        return detections
+        return out
+
+    def _predict_tiled(self, frame_bgr: "np.ndarray", conf: float) -> list[PlayerDetection]:
+        """Slice frame into 2×2 overlapping tiles + full frame, merge results."""
+        h, w = frame_bgr.shape[:2]
+        overlap = 0.25
+        tile_w, tile_h = int(w * 0.6), int(h * 0.6)
+        step_x = int(tile_w * (1 - overlap))
+        step_y = int(tile_h * (1 - overlap))
+
+        all_dets: list[PlayerDetection] = []
+        # Full frame at lower res first (global context)
+        all_dets.extend(self._predict_once(frame_bgr, conf, 0, 0))
+        # Tiles
+        for ty in range(0, h - tile_h // 2, step_y):
+            for tx in range(0, w - tile_w // 2, step_x):
+                x1, y1 = min(tx, w - tile_w), min(ty, h - tile_h)
+                x2, y2 = x1 + tile_w, y1 + tile_h
+                tile = frame_bgr[y1:y2, x1:x2]
+                all_dets.extend(self._predict_once(tile, conf, x1, y1))
+        return all_dets
+
+    @staticmethod
+    def _nms(dets: list[PlayerDetection], iou_thr: float) -> list[PlayerDetection]:
+        """Simple greedy NMS to deduplicate tiled detections."""
+        if not dets:
+            return []
+        dets = sorted(dets, key=lambda d: d.confidence, reverse=True)
+        keep: list[PlayerDetection] = []
+        for d in dets:
+            ax1, ay1, ax2, ay2 = d.bbox
+            suppressed = False
+            for k in keep:
+                bx1, by1, bx2, by2 = k.bbox
+                ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+                ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+                inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                union = (ax2-ax1)*(ay2-ay1) + (bx2-bx1)*(by2-by1) - inter
+                if union > 0 and inter / union > iou_thr:
+                    suppressed = True
+                    break
+            if not suppressed:
+                keep.append(d)
+        return keep
 
 
 class CalibratorApp(tk.Tk):
