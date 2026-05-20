@@ -2327,36 +2327,93 @@ class Calibration3DWindow(tk.Toplevel):
         self._draw()
 
     @staticmethod
-    def _backproject_kp(
-        u: float, v: float, z_world: float,
-        K: np.ndarray, R: np.ndarray, t: np.ndarray,
-    ) -> tuple[float, float, float] | None:
-        """Back-project image pixel (u,v) to the world point at height z_world."""
-        C = -(R.T @ t)                          # camera centre in world
-        d_cam = np.linalg.inv(K) @ np.array([u, v, 1.0])
-        d_world = R.T @ d_cam                   # ray direction in world space
-        if abs(d_world[2]) < 1e-6:
-            return None
-        lam = (z_world - C[2]) / d_world[2]
-        if lam >= 0:                            # flip-Z convention: visible ↔ lam < 0
-            return None
-        pt = C + lam * d_world
-        return (float(pt[0]), float(pt[1]), float(pt[2]))
-
-    def _reconstruct_pose_3d(
-        self,
+    def _reconstruct_pose_anchored(
         det: PlayerDetection,
-        K: np.ndarray, R: np.ndarray, t: np.ndarray,
+        foot_world: tuple[float, float],
+        H_img_to_world: np.ndarray,
     ) -> list[tuple[float, float, float] | None]:
-        """Return 17 world-space 3D points (or None where keypoint is invisible)."""
+        """
+        Build 3D skeleton anchored at foot_world (wx, wy).
+
+        Strategy:
+        - Z = anatomical height prior (KP_HEIGHT_M)
+        - World XY = foot_world + lateral lean estimated from image pixel displacement.
+
+        We estimate the lateral lean by:
+        1. Using the body's own pixel height (foot→head in pixels) to get a metres/pixel scale.
+        2. Projecting the horizontal pixel displacement (du = kx - u_foot) along the
+           camera-right world direction derived from the floor homography Jacobian.
+
+        This avoids independent back-projection per keypoint, which caused parallax
+        artefacts that made bodies appear to lean toward the camera in 3D.
+        """
         if det.keypoints is None:
             return [None] * 17
+
+        wx, wy = foot_world
+        kp = det.keypoints
+        uf, vf = _player_foot_image_pos(det)
+
+        # ── Estimate metres/pixel scale from the player's own body height in image ──
+        head_vs = [float(kp[i][1]) for i in (0, 1, 2, 3, 4)
+                   if i < len(kp) and kp[i][2] > 0.25]
+        v_scale: float
+        if head_vs:
+            head_v = sum(head_vs) / len(head_vs)
+            pix_h = abs(vf - head_v)
+            v_scale = (1.72 / pix_h) if pix_h > 8 else 0.0
+        else:
+            v_scale = 0.0
+
+        # Fallback: use floor homography Jacobian for scale
+        if v_scale == 0.0:
+            eps = 5.0
+            def _hmap(u: float, v: float) -> tuple[float, float] | None:
+                pt = H_img_to_world @ np.array([u, v, 1.0])
+                if abs(pt[2]) < 1e-9:
+                    return None
+                return float(pt[0] / pt[2]), float(pt[1] / pt[2])
+            base = _hmap(uf, vf)
+            up   = _hmap(uf, vf - eps)
+            if base and up:
+                v_scale = math.sqrt((up[0]-base[0])**2 + (up[1]-base[1])**2) / eps
+            else:
+                v_scale = 0.002   # ~500 px/m emergency fallback
+
+        # ── Camera-right direction in world XY (from homography Jacobian) ──
+        eps2 = 5.0
+        def _hmap2(u: float, v: float) -> tuple[float, float] | None:
+            pt = H_img_to_world @ np.array([u, v, 1.0])
+            if abs(pt[2]) < 1e-9:
+                return None
+            return float(pt[0] / pt[2]), float(pt[1] / pt[2])
+
+        base = _hmap2(uf, vf)
+        right = _hmap2(uf + eps2, vf)
+        if base and right:
+            rdx = right[0] - base[0]
+            rdy = right[1] - base[1]
+            rlen = math.sqrt(rdx * rdx + rdy * rdy)
+            if rlen > 1e-9:
+                rdx /= rlen
+                rdy /= rlen
+            else:
+                rdx, rdy = 1.0, 0.0
+            h_scale = rlen / eps2   # metres per pixel horizontally
+        else:
+            rdx, rdy = 1.0, 0.0
+            h_scale = v_scale
+
         result: list[tuple[float, float, float] | None] = []
-        for i, (kx, ky, kc) in enumerate(det.keypoints):
+        for i, (kx, ky, kc) in enumerate(kp):
             if kc < 0.25 or i >= len(KP_HEIGHT_M):
                 result.append(None)
                 continue
-            result.append(self._backproject_kp(float(kx), float(ky), KP_HEIGHT_M[i], K, R, t))
+            z = KP_HEIGHT_M[i]
+            # Lateral world displacement from horizontal pixel offset only
+            du = float(kx) - uf
+            lat = du * h_scale          # metres sideways
+            result.append((wx + lat * rdx, wy + lat * rdy, z))
         return result
 
     def _draw_stick_figure_3d(
@@ -2417,16 +2474,9 @@ class Calibration3DWindow(tk.Toplevel):
             if not camera:
                 continue
 
-            # Resolve K, R, t for back-projection
-            K_arr = R_arr = t_arr = None
-            proj = camera.get("projection", {})
-            for pose_key in ("camera_pose_pnp", "camera_pose"):
-                pose = proj.get(pose_key) or {}
-                if pose.get("intrinsics") and pose.get("rotation_world_to_camera"):
-                    K_arr = np.asarray(pose["intrinsics"], dtype=np.float64)
-                    R_arr = np.asarray(pose["rotation_world_to_camera"], dtype=np.float64)
-                    t_arr = np.asarray(pose["translation_world_to_camera"], dtype=np.float64)
-                    break
+            # H_image_to_world for anchored pose reconstruction
+            H_raw = camera.get("projection", {}).get("court_homography_image_to_world")
+            H_i2w = np.asarray(H_raw, dtype=np.float64) if H_raw is not None else None
 
             frame_time = float(camera.get("frame_time", 0.0))
             key = f"3d_{camera_name}@{frame_time:.4f}"
@@ -2458,21 +2508,8 @@ class Calibration3DWindow(tk.Toplevel):
                 color = PLAYER_PALETTE[global_idx % len(PLAYER_PALETTE)]
                 label = f"P{global_idx + 1}"
 
-                # 3D pose via back-projection if camera pose is available
-                kp3d: list[tuple[float, float, float] | None] | None = None
-                if K_arr is not None and R_arr is not None and t_arr is not None:
-                    kp3d = self._reconstruct_pose_3d(det, K_arr, R_arr, t_arr)
-                    # Reject if most keypoints back-projected outside plausible court bounds
-                    valid_pts = [p for p in kp3d if p is not None]
-                    if valid_pts:
-                        in_bounds = sum(
-                            1 for p in valid_pts
-                            if -8 < p[0] < L + 8 and -8 < p[1] < W + 8 and -0.2 < p[2] < 3.5
-                        )
-                        if in_bounds < len(valid_pts) * 0.4:
-                            kp3d = None  # back-projection unreliable for this detection
-
-                if kp3d is not None:
+                if H_i2w is not None and det.keypoints is not None:
+                    kp3d = self._reconstruct_pose_anchored(det, (wx, wy), H_i2w)
                     self._draw_stick_figure_3d(kp3d, (wx, wy), color, label)
                 else:
                     # Fallback: simple floor circle + vertical bar
