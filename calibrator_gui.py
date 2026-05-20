@@ -332,6 +332,44 @@ PLAYER_PALETTE = [
     "#cc5de8", "#f06595", "#63e6be", "#74c0fc", "#a9e34b",
 ]
 
+# Altura media (m) de cada keypoint COCO-17 para un jugador de pie (~1.80 m)
+KP_HEIGHT_M: list[float] = [
+    1.72,  # 0  nariz
+    1.76,  # 1  ojo izq
+    1.76,  # 2  ojo der
+    1.74,  # 3  oreja izq
+    1.74,  # 4  oreja der
+    1.46,  # 5  hombro izq
+    1.46,  # 6  hombro der
+    1.16,  # 7  codo izq
+    1.16,  # 8  codo der
+    0.88,  # 9  muñeca izq
+    0.88,  # 10 muñeca der
+    0.92,  # 11 cadera izq
+    0.92,  # 12 cadera der
+    0.50,  # 13 rodilla izq
+    0.50,  # 14 rodilla der
+    0.07,  # 15 tobillo izq
+    0.07,  # 16 tobillo der
+]
+
+# Color por segmento del esqueleto 3D
+_LIMB_COLOR: dict[tuple[int, int], str] = {
+    # Torso / columna
+    (5, 6): "#ffe066", (5, 11): "#ffe066", (6, 12): "#ffe066", (11, 12): "#ffe066",
+    (0, 5): "#ffe066", (0, 6): "#ffe066",
+    # Brazo izquierdo
+    (5, 7): "#ff6b6b", (7, 9): "#ff6b6b",
+    # Brazo derecho
+    (6, 8): "#4dabf7", (8, 10): "#4dabf7",
+    # Pierna izquierda
+    (11, 13): "#ff6b6b", (13, 15): "#ff6b6b",
+    # Pierna derecha
+    (12, 14): "#4dabf7", (14, 16): "#4dabf7",
+    # Cabeza
+    (0, 1): "#c3fae8", (0, 2): "#c3fae8", (1, 3): "#c3fae8", (2, 4): "#c3fae8",
+}
+
 try:
     from ultralytics import YOLO as _YOLO  # type: ignore
     _YOLO_AVAILABLE = True
@@ -2258,18 +2296,17 @@ class Calibration3DWindow(tk.Toplevel):
                 return float(center.get("x", 0)), float(center.get("y", 0))
         return None
 
-    # ── Player detection in 3D view ────────────────────────────────────────────
+    # ── Player detection + 3D pose ─────────────────────────────────────────────
 
     def _detect_camera_async_3d(self, key: str, camera_name: str, frame_bgr: np.ndarray) -> None:
         if key in self._player_running_3d:
             return
         self._player_running_3d.add(key)
         self._players_status_lbl.config(text="Detectando…")
-        detector = self._app._player_detector  # share detector/weights with main app
+        detector = self._app._player_detector
 
         def run() -> None:
             dets = detector.detect(frame_bgr)
-            # Project each detection to world coords using H_image_to_world
             camera = self.payload.get("cameras", {}).get(camera_name, {})
             H_raw = camera.get("projection", {}).get("court_homography_image_to_world")
             if H_raw is not None:
@@ -2286,27 +2323,115 @@ class Calibration3DWindow(tk.Toplevel):
         threading.Thread(target=run, daemon=True).start()
 
     def _on_detection_done_3d(self) -> None:
-        pending = bool(self._player_running_3d)
-        self._players_status_lbl.config(text="Detectando…" if pending else "")
+        self._players_status_lbl.config(text="Detectando…" if self._player_running_3d else "")
         self._draw()
+
+    @staticmethod
+    def _backproject_kp(
+        u: float, v: float, z_world: float,
+        K: np.ndarray, R: np.ndarray, t: np.ndarray,
+    ) -> tuple[float, float, float] | None:
+        """Back-project image pixel (u,v) to the world point at height z_world."""
+        C = -(R.T @ t)                          # camera centre in world
+        d_cam = np.linalg.inv(K) @ np.array([u, v, 1.0])
+        d_world = R.T @ d_cam                   # ray direction in world space
+        if abs(d_world[2]) < 1e-6:
+            return None
+        lam = (z_world - C[2]) / d_world[2]
+        if lam >= 0:                            # flip-Z convention: visible ↔ lam < 0
+            return None
+        pt = C + lam * d_world
+        return (float(pt[0]), float(pt[1]), float(pt[2]))
+
+    def _reconstruct_pose_3d(
+        self,
+        det: PlayerDetection,
+        K: np.ndarray, R: np.ndarray, t: np.ndarray,
+    ) -> list[tuple[float, float, float] | None]:
+        """Return 17 world-space 3D points (or None where keypoint is invisible)."""
+        if det.keypoints is None:
+            return [None] * 17
+        result: list[tuple[float, float, float] | None] = []
+        for i, (kx, ky, kc) in enumerate(det.keypoints):
+            if kc < 0.25 or i >= len(KP_HEIGHT_M):
+                result.append(None)
+                continue
+            result.append(self._backproject_kp(float(kx), float(ky), KP_HEIGHT_M[i], K, R, t))
+        return result
+
+    def _draw_stick_figure_3d(
+        self,
+        kp3d: list[tuple[float, float, float] | None],
+        foot_world: tuple[float, float],
+        color: str,
+        label: str,
+    ) -> None:
+        # Elliptical shadow on the floor
+        sx, sy = self._project((foot_world[0], foot_world[1], 0.0))
+        self.canvas.create_oval(sx - 10, sy - 5, sx + 10, sy + 5,
+                                fill="#111a28", outline=color, width=1)
+
+        # Skeleton limbs
+        for a_idx, b_idx in SKELETON_CONNECTIONS:
+            if a_idx >= len(kp3d) or b_idx >= len(kp3d):
+                continue
+            pa, pb = kp3d[a_idx], kp3d[b_idx]
+            if pa is None or pb is None:
+                continue
+            sax, say = self._project(pa)
+            sbx, sby = self._project(pb)
+            lc = _LIMB_COLOR.get((a_idx, b_idx), _LIMB_COLOR.get((b_idx, a_idx), color))
+            self.canvas.create_line(sax, say, sbx, sby, fill=lc, width=3)
+
+        # Joint dots
+        for i, pt in enumerate(kp3d):
+            if pt is None:
+                continue
+            jx, jy = self._project(pt)
+            r = 4 if i <= 4 else 3
+            self.canvas.create_oval(jx - r, jy - r, jx + r, jy + r,
+                                    fill="#ffffff" if i == 0 else color, outline="")
+
+        # Label above head
+        head_pts = [kp3d[i] for i in (0, 1, 2) if kp3d[i] is not None]
+        if head_pts:
+            hx = sum(p[0] for p in head_pts) / len(head_pts)
+            hy = sum(p[1] for p in head_pts) / len(head_pts)
+            hz = sum(p[2] for p in head_pts) / len(head_pts)
+            lx, ly = self._project((hx, hy, hz + 0.18))
+            self.canvas.create_text(lx, ly - 6, text=label,
+                                    fill=color, font=("Segoe UI", 8, "bold"))
+        else:
+            # fallback label above the stick
+            self.canvas.create_text(sx, sy - 14, text=label,
+                                    fill=color, font=("Segoe UI", 8, "bold"))
 
     def _draw_players_3d(self) -> None:
         if not PlayerDetector.available():
             return
-        L = self.court_spec.length_m
-
-        all_detections: list[tuple[int, PlayerDetection]] = []  # (global_idx, det)
+        L, W = self.court_spec.length_m, self.court_spec.width_m
         global_idx = 0
 
         for camera_name in ("cam1", "cam2"):
             camera = self.payload.get("cameras", {}).get(camera_name)
             if not camera:
                 continue
+
+            # Resolve K, R, t for back-projection
+            K_arr = R_arr = t_arr = None
+            proj = camera.get("projection", {})
+            for pose_key in ("camera_pose_pnp", "camera_pose"):
+                pose = proj.get(pose_key) or {}
+                if pose.get("intrinsics") and pose.get("rotation_world_to_camera"):
+                    K_arr = np.asarray(pose["intrinsics"], dtype=np.float64)
+                    R_arr = np.asarray(pose["rotation_world_to_camera"], dtype=np.float64)
+                    t_arr = np.asarray(pose["translation_world_to_camera"], dtype=np.float64)
+                    break
+
             frame_time = float(camera.get("frame_time", 0.0))
             key = f"3d_{camera_name}@{frame_time:.4f}"
 
             if key not in self._player_cache_3d:
-                # Load video frame and trigger detection
                 video_path = ROOT / camera.get("video", f"videos/{camera_name}.mov")
                 if not video_path.exists():
                     continue
@@ -2321,32 +2446,45 @@ class Calibration3DWindow(tk.Toplevel):
                 continue
 
             for det in self._player_cache_3d[key]:
-                all_detections.append((global_idx, det))
+                wp = det.world_pos
+                if wp is None:
+                    global_idx += 1
+                    continue
+                wx, wy = wp
+                if not (-5 < wx < L + 5 and -5 < wy < W + 5):
+                    global_idx += 1
+                    continue
+
+                color = PLAYER_PALETTE[global_idx % len(PLAYER_PALETTE)]
+                label = f"P{global_idx + 1}"
+
+                # 3D pose via back-projection if camera pose is available
+                kp3d: list[tuple[float, float, float] | None] | None = None
+                if K_arr is not None and R_arr is not None and t_arr is not None:
+                    kp3d = self._reconstruct_pose_3d(det, K_arr, R_arr, t_arr)
+                    # Reject if most keypoints back-projected outside plausible court bounds
+                    valid_pts = [p for p in kp3d if p is not None]
+                    if valid_pts:
+                        in_bounds = sum(
+                            1 for p in valid_pts
+                            if -8 < p[0] < L + 8 and -8 < p[1] < W + 8 and -0.2 < p[2] < 3.5
+                        )
+                        if in_bounds < len(valid_pts) * 0.4:
+                            kp3d = None  # back-projection unreliable for this detection
+
+                if kp3d is not None:
+                    self._draw_stick_figure_3d(kp3d, (wx, wy), color, label)
+                else:
+                    # Fallback: simple floor circle + vertical bar
+                    sx, sy = self._project((wx, wy, 0.0))
+                    hx, hy = self._project((wx, wy, 1.9))
+                    self.canvas.create_line(sx, sy, hx, hy, fill=color, width=2)
+                    r = 6
+                    self.canvas.create_oval(sx - r, sy - r, sx + r, sy + r,
+                                            fill=color, outline="#ffffff", width=1)
+                    self.canvas.create_text(hx, hy - 8, text=label,
+                                            fill=color, font=("Segoe UI", 8, "bold"))
                 global_idx += 1
-
-        for idx, det in all_detections:
-            color = PLAYER_PALETTE[idx % len(PLAYER_PALETTE)]
-            wp = det.world_pos
-            if wp is None:
-                continue
-            wx, wy = wp
-            # Discard implausible positions (outside court + margin)
-            if not (-5 < wx < L + 5 and -5 < wy < self.court_spec.width_m + 5):
-                continue
-
-            # Circle on the floor
-            sx, sy = self._project((wx, wy, 0.0))
-            r = 6
-            self.canvas.create_oval(sx - r, sy - r, sx + r, sy + r,
-                                    fill=color, outline="#ffffff", width=1)
-
-            # Vertical stick (approx 2 m player height)
-            hx, hy = self._project((wx, wy, 2.0))
-            self.canvas.create_line(sx, sy, hx, hy, fill=color, width=2)
-
-            # Label
-            self.canvas.create_text(hx, hy - 8, text=f"P{idx+1}",
-                                    fill=color, font=("Segoe UI", 8, "bold"))
 
     # ── End player detection ────────────────────────────────────────────────────
 
